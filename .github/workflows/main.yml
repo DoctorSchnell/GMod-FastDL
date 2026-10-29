@@ -1,12 +1,18 @@
 name: Deploy FastDL
 
 on:
+  push:
+    branches: [main]
+
+  release:
+    types: [published]
+
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release tag containing the Pages ZIP
-        required: true
-        default: v0.1.0
+        description: "Release tag, or leave blank for the latest release"
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -20,6 +26,8 @@ concurrency:
 
 jobs:
   deploy:
+    # Automatically deploy stable releases only.
+    if: github.event_name != 'release' || !github.event.release.prerelease
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -28,19 +36,57 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Download Pages ZIP from release
+      - name: Read files from main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Download release content
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        shell: bash
         run: |
-          gh release download "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern "ac130-pages-*.zip" \
-            --output payload.zip
+          set -euo pipefail
 
-      - name: Extract and check files
+          args=(
+            --repo "$GITHUB_REPOSITORY"
+            --pattern "*-pages-*.zip"
+            --output "$RUNNER_TEMP/payload.zip"
+          )
+
+          if [ -n "$RELEASE_TAG" ]; then
+            args+=("$RELEASE_TAG")
+          fi
+
+          gh release download "${args[@]}"
+          mkdir -p public
+          unzip -q "$RUNNER_TEMP/payload.zip" -d public
+
+      - name: Add repository files
+        shell: bash
         run: |
-          unzip -q payload.zip -d public
+          set -euo pipefail
+
+          # Repository files override matching release files.
+          for dir in maps models materials sound resource scripts particles gfx notices; do
+            if [ -d "$dir" ]; then
+              mkdir -p "public/$dir"
+              cp -a "$dir/." "public/$dir/"
+            fi
+          done
+
+          for file in index.html .nojekyll CNAME; do
+            if [ -f "$file" ]; then
+              cp "$file" "public/$file"
+            fi
+          done
+
+      - name: Check prepared site
+        shell: bash
+        run: |
+          set -euo pipefail
           test -f public/index.html
           test -f public/.nojekyll
           test -d public/materials
