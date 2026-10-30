@@ -1,1 +1,171 @@
-<!doctype html><meta charset="utf-8"><title>Medicinal AC130 FastDL</title><p>Medicinal AC130 artwork: DoctorSchnell / Codex.</p><p>Engine sound: FlightGear C130, Emmanuel Baranger (Helijah), Didier Fabert and contributors; <a href="notices/FlightGear-COPYING.txt">GPL-2.0</a>, <a href="notices/flightgear-engine-source.zip">editable source and adaptation</a>.</p><p>GAU/howitzer audio adaptations retain U.S. Air Force / MSgt Jeffrey Curtin and U.S. Army / SGT Bryan Spradlin / 16th Mobile Public Affairs Detachment credits. No U.S. government endorsement is implied.</p>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Medicinal Sandbox · FastDL</title>
+  <style>
+    :root { color-scheme: dark; font: 16px/1.5 system-ui, sans-serif; background: #101719; color: #e7eeee; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { max-width: 1280px; margin: auto; padding: 48px 28px; }
+    a { color: #8ee8c0; text-underline-offset: 3px; }
+    a:hover { color: #c7ffe7; }
+    h1 { font-size: clamp(2rem, 5vw, 3.3rem); line-height: 1.1; margin: 8px 0 14px; letter-spacing: -.04em; }
+    h2 { font-size: 1rem; margin: 0 0 10px; }
+    p { margin: 8px 0 20px; }
+    .eyebrow { color: #8ee8c0; text-transform: uppercase; letter-spacing: .14em; font-size: .75rem; font-weight: 700; }
+    .muted { color: #a7b9bb; }
+    .stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 28px 0; }
+    .stat { min-width: 180px; flex: 1; background: #182326; border: 1px solid #304145; border-radius: 12px; padding: 18px; }
+    .stat strong { display: block; font-size: 1.5rem; font-weight: 600; }
+    .stat span { color: #a7b9bb; font-size: .85rem; }
+    nav { display: flex; flex-wrap: wrap; gap: 10px 24px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 30px 0 14px; }
+    label { display: grid; gap: 5px; font-size: .85rem; color: #a7b9bb; }
+    .search { flex: 1; min-width: 220px; }
+    input, select { width: 100%; background: #182326; color: #e7eeee; border: 1px solid #456065; border-radius: 7px; padding: 10px 12px; font: inherit; }
+    input:focus, select:focus, a:focus { outline: 2px solid #8ee8c0; outline-offset: 3px; }
+    .table-wrap { overflow-x: auto; border: 1px solid #304145; border-radius: 10px; }
+    table { border-collapse: collapse; width: 100%; text-align: left; }
+    th { color: #a7b9bb; font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; background: #182326; }
+    th, td { padding: 15px 18px; border-bottom: 1px solid #304145; vertical-align: top; }
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: #182326; }
+    td:first-child { min-width: 260px; overflow-wrap: anywhere; }
+    td:nth-child(2) { white-space: nowrap; }
+    td:nth-child(3) { min-width: 170px; overflow-wrap: anywhere; }
+    code { font: .8rem/1.5 ui-monospace, monospace; overflow-wrap: anywhere; }
+    td details { margin-top: 5px; }
+    summary { cursor: pointer; color: #a7b9bb; font-size: .8rem; }
+    .source-detail { display: block; font-size: .8rem; color: #a7b9bb; }
+    footer { border-top: 1px solid #304145; padding-top: 20px; margin-top: 32px; font-size: .85rem; color: #a7b9bb; }
+    #status { min-height: 24px; }
+    #credits { margin-top: 16px; max-width: 800px; }
+    #credits p { margin-top: 10px; }
+    @media (max-width: 600px) { main { padding: 28px 16px; } th, td { padding: 12px; } .stat { min-width: 140px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Medicinal Sandbox / Content delivery</div>
+    <h1>FastDL file library</h1>
+    <p class="muted">Browse the files published in this deployment. Select a path to download it.</p>
+    <nav aria-label="Deployment links">
+      <a href="./manifest.json">Download JSON manifest</a>
+      <a href="https://github.com/DoctorSchnell/GMod-FastDL">Source repository</a>
+      <a id="run" hidden>Deployment run</a>
+      <a id="commit" hidden>Repository commit</a>
+    </nav>
+  </header>
+  <section class="stats" aria-label="Deployment totals">
+    <div class="stat"><strong id="count">—</strong><span>Indexed files</span></div>
+    <div class="stat"><strong id="size">—</strong><span>Indexed download size</span></div>
+    <div class="stat"><strong id="date">—</strong><span>Inventory built · your local time</span></div>
+  </section>
+  <div class="toolbar">
+    <label class="search">Search files or sources<input id="query" type="search" placeholder="Map name, folder, release…"></label>
+    <label>Folder<select id="folder"><option value="">All folders</option></select></label>
+    <label>Sort by<select id="sort"><option value="path">File path</option><option value="size">Largest first</option><option value="source">Source</option></select></label>
+  </div>
+  <p id="status" class="muted" role="status" aria-live="polite">Loading published inventory…</p>
+  <noscript><p>Enable JavaScript to browse the table, or download the JSON manifest above.</p></noscript>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">File / checksum</th><th scope="col">Size</th><th scope="col">Published from</th></tr></thead>
+      <tbody id="files"></tbody>
+    </table>
+  </div>
+  <footer>
+    <p>This inventory was generated with the deployed files. Sizes and SHA-256 hashes describe the hosted bytes, including compression. It includes this homepage and excludes the manifest itself.</p>
+    <details id="credits">
+      <summary>AC130 attribution · applies when AC130 content is hosted here</summary>
+      <p>Medicinal AC130 artwork: DoctorSchnell / Codex.</p>
+      <p>Engine sound: FlightGear C130, Emmanuel Baranger (Helijah), Didier Fabert and contributors; GPL-2.0. Required notices and editable source accompany hosted AC130 content in <code>notices/</code>.</p>
+      <p>GAU/howitzer audio adaptations retain U.S. Air Force / MSgt Jeffrey Curtin and U.S. Army / SGT Bryan Spradlin / 16th Mobile Public Affairs Detachment credits. No U.S. government endorsement is implied.</p>
+    </details>
+  </footer>
+</main>
+<script>
+  'use strict';
+  const element = id => document.getElementById(id);
+  let inventory;
+  const sourceLabel = source => source.kind === 'release' ? `Release ${source.tag}` : 'Repository main';
+  const sourceDetail = source => source.kind === 'release' ? source.asset : source.path;
+  function sizeLabel(bytes) {
+    const units = ['B', 'KiB', 'MiB', 'GiB'];
+    let value = bytes, unit = 0;
+    while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+    return `${value.toLocaleString(undefined, { maximumFractionDigits: unit ? 2 : 0 })} ${units[unit]}`;
+  }
+  function addText(tag, text, parent, className) {
+    const node = document.createElement(tag);
+    node.textContent = text;
+    if (className) node.className = className;
+    parent.append(node);
+    return node;
+  }
+  function render() {
+    if (!inventory) return;
+    const query = element('query').value.trim().toLowerCase();
+    const folder = element('folder').value;
+    const files = inventory.files.filter(file =>
+      (!folder || (file.path.includes('/') ? file.path.split('/')[0] : '(root)') === folder) &&
+      `${file.path} ${sourceLabel(file.source)} ${sourceDetail(file.source)}`.toLowerCase().includes(query));
+    const mode = element('sort').value;
+    files.sort((a, b) => (mode === 'size' ? b.bytes - a.bytes : mode === 'source' ?
+      sourceLabel(a.source).localeCompare(sourceLabel(b.source)) : 0) || a.path.localeCompare(b.path));
+    const rows = document.createDocumentFragment();
+    for (const file of files) {
+      const row = document.createElement('tr');
+      const pathCell = document.createElement('td');
+      const link = addText('a', file.path, pathCell);
+      link.href = './' + file.path.split('/').map(encodeURIComponent).join('/');
+      const details = document.createElement('details');
+      addText('summary', 'SHA-256', details);
+      addText('code', file.sha256, details);
+      pathCell.append(details);
+      row.append(pathCell);
+      const bytes = addText('td', sizeLabel(file.bytes), row);
+      bytes.title = `${file.bytes.toLocaleString()} bytes`;
+      const source = document.createElement('td');
+      addText('span', sourceLabel(file.source), source);
+      addText('span', sourceDetail(file.source), source, 'source-detail');
+      row.append(source);
+      rows.append(row);
+    }
+    element('files').replaceChildren(rows);
+    element('status').textContent = `${files.length.toLocaleString()} of ${inventory.file_count.toLocaleString()} files · ${sizeLabel(files.reduce((sum, file) => sum + file.bytes, 0))} shown`;
+  }
+  async function load() {
+    try {
+      const response = await fetch('./manifest.json', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      inventory = await response.json();
+      if (inventory.schema_version !== 1 || !Array.isArray(inventory.files)) throw new Error('Unsupported inventory');
+      element('count').textContent = inventory.file_count.toLocaleString();
+      element('size').textContent = sizeLabel(inventory.total_bytes);
+      element('date').textContent = new Date(inventory.deployment.generated_at).toLocaleString();
+      for (const folder of [...new Set(inventory.files.map(file => file.path.includes('/') ? file.path.split('/')[0] : '(root)'))].sort()) {
+        const option = addText('option', folder, element('folder'));
+        option.value = folder;
+      }
+      const repository = 'https://github.com/' + inventory.deployment.repository.split('/').map(encodeURIComponent).join('/');
+      element('run').href = `${repository}/actions/runs/${encodeURIComponent(inventory.deployment.run_id)}/attempts/${encodeURIComponent(inventory.deployment.run_attempt)}`;
+      element('run').hidden = false;
+      element('commit').href = `${repository}/commit/${encodeURIComponent(inventory.deployment.commit)}`;
+      element('commit').hidden = false;
+      render();
+    } catch (error) {
+      element('status').textContent = 'The file inventory could not be loaded. Refresh the page or open the JSON manifest above.';
+      console.error(error);
+    }
+  }
+  element('query').addEventListener('input', render);
+  element('folder').addEventListener('change', render);
+  element('sort').addEventListener('change', render);
+  load();
+</script>
+</body>
+</html>
