@@ -43,95 +43,164 @@ jobs:
           ref: main
           persist-credentials: false
 
-      - name: Combine releases and repository assets
+      - name: Combine content and generate inventory
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          set -euo pipefail
           python3 - <<'PY'
           import hashlib
           import json
           import os
+          from datetime import datetime, timezone
           from pathlib import Path, PurePosixPath
           import shutil
           import subprocess
+          from urllib.parse import quote
           import zipfile
-          
-          
-          def build(workspace, releases, download):
-              site = workspace / "public"
-              site.mkdir(exist_ok=True)
-              cache = workspace / ".release-downloads"
-              cache.mkdir(exist_ok=True)
-              published = [r for r in releases if not r.get("draft")]
-              published.sort(key=lambda r: (r.get("published_at") or "", r["id"]))
+
+
+          def visible(path):
+              # Match upload-pages-artifact@v4's exclusion of hidden paths.
+              return all(not part.startswith('.') for part in path.parts)
+
+
+          def safe_path(name):
+              path = PurePosixPath(name.replace('\\', '/'))
+              if (not path.parts or path.is_absolute() or '..' in path.parts
+                      or any(':' in part for part in path.parts)):
+                  raise RuntimeError(f'Unsafe asset path: {name}')
+              return path
+
+
+          def build(workspace, releases, download, deployment):
+              site = workspace / 'public'
+              site.mkdir()  # Fail rather than inventory a pre-existing directory.
+              cache = workspace / '.release-downloads'
+              cache.mkdir()
+              sources = {}
+              inputs = []
+              published = sorted(
+                  (r for r in releases if not r.get('draft')),
+                  key=lambda r: (r.get('published_at') or '', r['id']))
               for release in published:
-                  for asset in sorted(release["assets"], key=lambda a: (a.get("updated_at") or "", a["id"])):
-                      name = asset["name"]
+                  assets = sorted(release['assets'], key=lambda a: (a.get('updated_at') or '', a['id']))
+                  for asset in assets:
+                      name = asset['name']
                       lower = name.lower()
-                      if not lower.endswith((".zip", ".bsp", ".bsp.bz2")):
+                      if not lower.endswith(('.zip', '.bsp', '.bsp.bz2')):
                           continue
-                      if PurePosixPath(name).name != name or "\\" in name:
-                          raise RuntimeError(f"Invalid release filename: {name}")
-                      package = cache / str(asset["id"])
+                      if safe_path(name).name != name or '\\' in name:
+                          raise RuntimeError(f'Invalid release filename: {name}')
+                      package = cache / str(asset['id'])
                       download(release, asset, package)
-                      digest = asset.get("digest") or ""
-                      if digest.startswith("sha256:"):
-                          with package.open("rb") as stream:
-                              actual = hashlib.file_digest(stream, "sha256").hexdigest()
-                          if actual != digest.removeprefix("sha256:"):
-                              raise RuntimeError(f"Release checksum mismatch: {name}")
+                      with package.open('rb') as stream:
+                          digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+                      expected = asset.get('digest') or ''
+                      if expected.startswith('sha256:') and digest != expected.removeprefix('sha256:'):
+                          raise RuntimeError(f'Release checksum mismatch: {name}')
+                      source = dict(kind='release', tag=release['tag_name'],
+                                    release_id=release['id'], asset=name, asset_id=asset['id'])
+                      inputs.append(dict(source, sha256=digest, bytes=package.stat().st_size))
                       print(f"Including {release['tag_name']}: {name}", flush=True)
-                      if lower.endswith(".zip"):
+                      if lower.endswith('.zip'):
                           with zipfile.ZipFile(package) as archive:
                               for entry in archive.infolist():
-                                  relative = PurePosixPath(entry.filename.replace("\\", "/"))
-                                  if (relative.is_absolute() or ".." in relative.parts
-                                          or any(":" in p for p in relative.parts)
-                                          or (entry.external_attr >> 16) & 0o170000 == 0o120000):
-                                      raise RuntimeError(f"Unsafe ZIP entry: {entry.filename}")
+                                  # ZIP directory markers can include a harmless root './'.
+                                  if entry.is_dir() and entry.filename in ('.', './'):
+                                      continue
+                                  relative = safe_path(entry.filename)
+                                  if (entry.external_attr >> 16) & 0o170000 == 0o120000:
+                                      raise RuntimeError(f'ZIP symlink: {entry.filename}')
+                                  if entry.is_dir() or entry.filename.endswith(('/', '\\')):
+                                      continue
+                                  if not visible(relative) or relative.as_posix() == 'manifest.json':
+                                      continue
                                   target = site.joinpath(*relative.parts)
-                                  if entry.is_dir() or entry.filename.endswith(("/", "\\")):
-                                      target.mkdir(parents=True, exist_ok=True)
-                                  else:
-                                      target.parent.mkdir(parents=True, exist_ok=True)
-                                      with archive.open(entry) as inp, target.open("wb") as out:
-                                          shutil.copyfileobj(inp, out)
+                                  target.parent.mkdir(parents=True, exist_ok=True)
+                                  with archive.open(entry) as inp, target.open('wb') as out:
+                                      shutil.copyfileobj(inp, out)
+                                  sources[relative.as_posix()] = dict(source, archive_path=entry.filename)
                       else:
-                          (site / "maps").mkdir(exist_ok=True)
-                          shutil.copyfile(package, site / "maps" / name)
-          
-              # Repository uploads take precedence over release contents.
-              for name in ("maps", "models", "materials", "sound", "sounds", "resource",
-                           "scripts", "particles", "gfx", "notices"):
+                          relative = 'maps/' + name
+                          (site / 'maps').mkdir(exist_ok=True)
+                          shutil.copyfile(package, site / relative)
+                          sources[relative] = dict(source)
+
+              # Repository uploads take precedence over all release contents.
+              for name in ('maps', 'models', 'materials', 'sound', 'sounds', 'resource',
+                           'scripts', 'particles', 'gfx', 'notices'):
+                  root = workspace / name
+                  if root.is_symlink():
+                      raise RuntimeError(f'Repository symlink: {name}')
+                  if not root.is_dir():
+                      continue
+                  for source in sorted(root.rglob('*')):
+                      relative = source.relative_to(workspace)
+                      if source.is_symlink():
+                          raise RuntimeError(f'Repository symlink: {relative}')
+                      if not source.is_file() or not visible(relative):
+                          continue
+                      target = site / relative
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      shutil.copyfile(source, target)
+                      sources[relative.as_posix()] = dict(kind='repository', path=relative.as_posix(),
+                                                         commit=deployment['commit'])
+              for name in ('index.html', 'CNAME'):
                   source = workspace / name
-                  if source.is_dir():
-                      shutil.copytree(source, site / name, dirs_exist_ok=True)
-              for name in ("index.html", "CNAME", ".nojekyll"):
-                  source = workspace / name
+                  if source.is_symlink():
+                      raise RuntimeError(f'Repository symlink: {name}')
                   if source.is_file():
-                      shutil.copy2(source, site / name)
-              (site / ".nojekyll").touch()
-              if not (site / "index.html").is_file():
-                  raise RuntimeError("The site needs index.html in the repository or a release ZIP")
-              files = [p for p in site.rglob("*") if p.is_file()]
-              print(f"Prepared {len(files)} files, {sum(p.stat().st_size for p in files):,} bytes")
-              return site
-          
-          
-          if __name__ == "__main__":
-              repo = os.environ["GITHUB_REPOSITORY"]
+                      shutil.copyfile(source, site / name)
+                      sources[name] = dict(kind='repository', path=name, commit=deployment['commit'])
+              if not (workspace / 'index.html').is_file():
+                  raise RuntimeError('Add the inventory index.html template to the repository root')
+
+              files = []
+              for path in sorted(site.rglob('*')):
+                  if not path.is_file():
+                      continue
+                  relative = path.relative_to(site).as_posix()
+                  with path.open('rb') as stream:
+                      digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+                  files.append(dict(path=relative, url='./' + quote(relative, safe='/'),
+                                    bytes=path.stat().st_size, sha256=digest, source=sources[relative]))
+              manifest = dict(schema_version=1, deployment=deployment, inputs=inputs, files=files,
+                              file_count=len(files), total_bytes=sum(f['bytes'] for f in files),
+                              excludes=['manifest.json'])
+              (site / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+              print(f"Prepared {len(files)} indexed files, {manifest['total_bytes']:,} bytes, plus manifest.json")
+              return site, manifest
+
+
+          if __name__ == '__main__':
+              repo = os.environ['GITHUB_REPOSITORY']
               pages = json.loads(subprocess.check_output([
-                  "gh", "api", f"repos/{repo}/releases?per_page=100", "--paginate", "--slurp"
+                  'gh', 'api', f'repos/{repo}/releases?per_page=100', '--paginate', '--slurp'
               ], text=True))
-          
+
               def download(release, asset, target):
-                  subprocess.run([
-                      "gh", "release", "download", release["tag_name"], "--repo", repo,
-                      "--pattern", asset["name"], "--output", str(target)
-                  ], check=True)
-          
-              build(Path.cwd(), [r for page in pages for r in page], download)
+                  # Fetch the exact asset ID, avoiding filename glob interpretation.
+                  with target.open('wb') as output:
+                      subprocess.run([
+                          'gh', 'api', f"repos/{repo}/releases/assets/{asset['id']}",
+                          '-H', 'Accept: application/octet-stream'
+                      ], stdout=output, check=True)
+
+              commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+              run_id = os.environ['GITHUB_RUN_ID']
+              attempt = os.environ.get('GITHUB_RUN_ATTEMPT', '1')
+              deployment = dict(repository=repo, commit=commit, run_id=run_id, run_attempt=attempt,
+                                run_url=f'https://github.com/{repo}/actions/runs/{run_id}/attempts/{attempt}',
+                                generated_at=datetime.now(timezone.utc).isoformat())
+              site, manifest = build(Path.cwd(), [r for page in pages for r in page], download, deployment)
+              summary = os.environ.get('GITHUB_STEP_SUMMARY')
+              if summary:
+                  with open(summary, 'a', encoding='utf-8') as output:
+                      output.write(f"## FastDL inventory\n\n{manifest['file_count']} indexed files, "
+                                   f"{manifest['total_bytes']:,} bytes, plus manifest.json.\n\n"
+                                   'The homepage and manifest are included in this deployment artifact.\n')
           PY
 
       - name: Configure GitHub Pages
