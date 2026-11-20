@@ -50,15 +50,247 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import bz2
           import hashlib
           import json
           import os
           from datetime import datetime, timezone
           from pathlib import Path, PurePosixPath
+          import re
           import shutil
           import subprocess
           from urllib.parse import quote
           import zipfile
+
+
+          WITHDRAWAL_CONFIG = 'fastdl-withdrawn-maps.json'
+          CATALOG = 'fastdl-map-catalog.json'
+          REQUIRE_CATALOG = True  # Bridge rollout uses False until the initial catalog commit.
+          MANAGED_TAG = 'managed-map-'
+          MAP_NAME = re.compile('[a-z0-9_]{1,100}')
+          ROOT_BSP = re.compile(r'maps/([^/]+)\.bsp(?:\.bz2)?')
+          SHA256 = re.compile('[0-9a-f]{64}')
+          MAX_BUNDLE = 512 * 1024**2
+          MAX_EXPANDED = 1024**3
+          MAX_FILES = 20000
+          MAX_RESERVED = 10000
+          ASSET_EXTENSIONS = {
+              'materials': {'vmt', 'vtf', 'png', 'jpg', 'jpeg'},
+              'models': {'mdl', 'vvd', 'vtx', 'phy', 'ani'},
+              'sound': {'wav', 'mp3', 'ogg'},
+              'sounds': {'wav', 'mp3', 'ogg'},
+              'particles': {'pcf'},
+              'resource': {'ttf', 'otf'},
+              'gfx': {'vmt', 'vtf', 'png', 'jpg', 'jpeg'},
+          }
+
+
+          def unique_dict(pairs):
+              result = {}
+              for name, value in pairs:
+                  if name in result:
+                      raise RuntimeError(f'Duplicate catalog key: {name}')
+                  result[name] = value
+              return result
+
+
+          def digest(value):
+              return isinstance(value, str) and SHA256.fullmatch(value) is not None
+
+
+          def logical_path(path):
+              return path.lower().removesuffix('.bz2')
+
+
+          def managed_path(path, owner):
+              relative = safe_path(path)
+              if (path != relative.as_posix() or path.lower() != path or not visible(relative)
+                      or not re.fullmatch(r'[a-z0-9_./ -]{1,512}', path)):
+                  return False
+              logical = logical_path(path)
+              if logical == f'maps/{owner}.bsp':
+                  return True
+              if path != logical:
+                  return False  # Managed loose files retain their original on-disk bytes.
+              # Map thumbnails are client assets; other map-tree sidecars,
+              # including NAV/AIN, are not part of managed redistribution.
+              if re.fullmatch(r'maps/thumb/[^/]+\.(?:png|jpg|jpeg)', path):
+                  return True
+              root, slash, filename = logical.partition('/')
+              return bool(slash and filename.rpartition('.')[2] in ASSET_EXTENSIONS.get(root, set()))
+
+
+          def map_catalog(workspace, required):
+              path = workspace / CATALOG
+              if path.is_symlink() or (path.exists() and not path.is_file()):
+                  raise RuntimeError('FastDL map catalog must be a regular file')
+              if not path.is_file():
+                  if required:
+                      raise RuntimeError('Missing authoritative FastDL map catalog')
+                  return None, None
+              if path.stat().st_size > 8 * 1024**2:
+                  raise RuntimeError('FastDL map catalog exceeds 8 MiB')
+              raw = path.read_bytes()
+              data = json.loads(raw, object_pairs_hook=unique_dict)
+              if (not isinstance(data, dict) or type(data.get('schema')) is not int or data['schema'] != 1
+                      or type(data.get('generation')) is not int or data['generation'] < 1
+                      or not isinstance(data.get('maps'), dict) or not isinstance(data.get('reserved'), list)
+                      or len(data['reserved']) > MAX_RESERVED
+                      or not all(isinstance(name, str) and MAP_NAME.fullmatch(name) for name in data['reserved'])
+                      or len(set(data['reserved'])) != len(data['reserved'])
+                      or not set(data['maps']) <= set(data['reserved'])):
+                  raise RuntimeError('Invalid FastDL map catalog schema or reserved map names')
+              for name, entry in data['maps'].items():
+                  if not isinstance(entry, dict):
+                      raise RuntimeError(f'Invalid FastDL map catalog entry: {name}')
+                  files = entry.get('files')
+                  variants = {f'maps/{name}.bsp', f'maps/{name}.bsp.bz2'}
+                  if not isinstance(files, dict) or len(files) > MAX_FILES or not variants & files.keys():
+                      raise RuntimeError(f'Invalid managed inventory or missing BSP for {name}')
+                  if ('bundle' in entry) == ('pins' in entry):
+                      raise RuntimeError(f'One bundle or migration pins required for {name}')
+                  if 'bundle' in entry:
+                      bundle = entry['bundle']
+                      if (not isinstance(bundle, dict) or not digest(bundle.get('sha256'))
+                              or bundle.get('tag') != MANAGED_TAG + bundle['sha256']
+                              or bundle.get('asset') != 'managed-map.zip'):
+                          raise RuntimeError(f'Invalid managed bundle for {name}')
+                  else:
+                      pins = entry['pins']
+                      if not isinstance(pins, dict) or set(pins) != set(files) or not set(pins) <= variants:
+                          raise RuntimeError(f'Invalid migration pin inventory for {name}')
+                      for game_path, pin in pins.items():
+                          if (not isinstance(pin, dict) or set(pin) != {'tag', 'release_id', 'asset_id', 'asset'}
+                                  or not isinstance(pin['tag'], str) or not pin['tag']
+                                  or pin['tag'].lower().startswith(MANAGED_TAG)
+                                  or type(pin['release_id']) is not int or pin['release_id'] <= 0
+                                  or type(pin['asset_id']) is not int or pin['asset_id'] <= 0
+                                  or pin['asset'] != PurePosixPath(game_path).name):
+                              raise RuntimeError(f'Invalid migration pin for {name}: {game_path}')
+                  for game_path, record in files.items():
+                      if (not managed_path(game_path, name) or not isinstance(record, dict)
+                              or type(record.get('bytes')) is not int
+                              or set(record) != {'bytes', 'sha256'}
+                              or not 0 <= record['bytes'] <= MAX_BUNDLE or not digest(record.get('sha256'))):
+                          raise RuntimeError(f'Invalid managed file for {name}: {game_path}')
+                  if sum(record['bytes'] for record in files.values()) > MAX_EXPANDED:
+                      raise RuntimeError(f'Managed map payload exceeds 1 GiB: {name}')
+              return data, dict(generation=data['generation'], sha256=hashlib.sha256(raw).hexdigest())
+
+
+          def stream_identity(stream, limit=MAX_EXPANDED):
+              total, checksum = 0, hashlib.sha256()
+              while block := stream.read(1024**2):
+                  total += len(block)
+                  if total > limit:
+                      raise RuntimeError('FastDL file exceeds expected size')
+                  checksum.update(block)
+              return dict(bytes=total, sha256=checksum.hexdigest())
+
+
+          def logical_identity(path, game_path):
+              with (bz2.open if game_path.endswith('.bz2') else open)(path, 'rb') as stream:
+                  return stream_identity(stream)
+
+
+          def apply_catalog(catalog, site, cache, sources, inputs, published, download):
+              releases = {}
+              for release in published:
+                  releases.setdefault(release['tag_name'], []).append(release)
+              aliases = {}
+              for game_path in sources:
+                  aliases.setdefault(logical_path(game_path), []).append(game_path)
+              owners = {}
+
+              def overlay(candidate, owner, name, record, source):
+                  logical = logical_path(name)
+                  identity = logical_identity(candidate, name)
+                  for other in aliases.get(logical, ()):
+                      if other != other.lower() or logical_identity(site / other, other) != identity:
+                          raise RuntimeError(f'Managed path conflict: {owner}: {name} vs {other}')
+                      if name == other:
+                          with (site / other).open('rb') as stream:
+                              if stream_identity(stream) != record:
+                                  raise RuntimeError(f'Managed wire-byte conflict: {owner}: {name}')
+                  if name not in sources:
+                      target = site / name
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      shutil.copyfile(candidate, target)
+                      sources[name] = source
+                      aliases.setdefault(logical, []).append(name)
+                  owners.setdefault(name, []).append(owner)
+
+              for owner, entry in sorted(catalog['maps'].items()):
+                  if 'pins' in entry:
+                      for name, reference in sorted(entry['pins'].items()):
+                          candidates = releases.get(reference['tag'], [])
+                          matches = [(r, a) for r in candidates for a in r['assets']
+                                     if a['name'] == reference['asset'] or a['id'] == reference['asset_id']]
+                          if (len(candidates) != 1 or len(matches) != 1
+                                  or matches[0][0]['id'] != reference['release_id']
+                                  or matches[0][1]['id'] != reference['asset_id']
+                                  or matches[0][1]['name'] != reference['asset']):
+                              raise RuntimeError(f'Missing or ambiguous pinned historical asset: {owner}: {name}')
+                          release, asset = matches[0]
+                          record = entry['files'][name]
+                          if asset.get('size', record['bytes']) != record['bytes']:
+                              raise RuntimeError(f'Pinned historical asset size mismatch: {owner}: {name}')
+                          candidate = cache / f"pinned-{asset['id']}"
+                          download(release, asset, candidate)
+                          with candidate.open('rb') as stream:
+                              if stream_identity(stream, record['bytes']) != record:
+                                  raise RuntimeError(f'Pinned historical asset checksum mismatch: {owner}: {name}')
+                          with (bz2.open if name.endswith('.bz2') else open)(candidate, 'rb') as stream:
+                              if stream.read(4) != b'VBSP':
+                                  raise RuntimeError(f'Invalid pinned playable BSP: {owner}: {name}')
+                          source = dict(kind='managed-map', tag=release['tag_name'], release_id=release['id'],
+                                        asset=asset['name'], asset_id=asset['id'], map=owner)
+                          inputs.append(dict(source, **record))
+                          overlay(candidate, owner, name, record, source)
+                      continue
+                  reference = entry['bundle']
+                  candidates = releases.get(reference['tag'], [])
+                  matches = [(release, asset) for release in candidates for asset in release['assets']
+                             if asset['name'] == reference['asset']]
+                  if len(candidates) != 1 or len(matches) != 1:
+                      raise RuntimeError(f'Missing or ambiguous managed archive for {owner}: {reference}')
+                  release, asset = matches[0]
+                  declared_size = asset.get('size')
+                  if declared_size is not None and (type(declared_size) is not int or
+                                                     not 0 < declared_size <= MAX_BUNDLE):
+                      raise RuntimeError(f'Managed archive exceeds transfer bounds: {owner}')
+                  package = cache / f"managed-{asset['id']}"
+                  download(release, asset, package)
+                  with package.open('rb') as stream:
+                      packaged = stream_identity(stream, MAX_BUNDLE)
+                  if (packaged['sha256'] != reference['sha256'] or
+                          declared_size is not None and declared_size != packaged['bytes']):
+                      raise RuntimeError(f'Managed archive checksum mismatch: {owner}')
+                  source = dict(kind='managed-map', tag=release['tag_name'], release_id=release['id'],
+                                asset=asset['name'], asset_id=asset['id'], map=owner)
+                  inputs.append(dict(source, **packaged))
+                  with zipfile.ZipFile(package) as archive:
+                      if len(archive.infolist()) > len(entry['files']):
+                          raise RuntimeError(f'Unexpected managed archive members: {owner}')
+                      seen = set()
+                      for member in archive.infolist():
+                          name = member.filename
+                          record = entry['files'].get(name)
+                          mode = (member.external_attr >> 16) & 0o170000
+                          if (not record or name in seen or mode not in (0, 0o100000)
+                                  or member.file_size != record['bytes'] or member.orig_filename != name):
+                              raise RuntimeError(f'Unexpected managed archive member: {owner}: {name}')
+                          seen.add(name)
+                          candidate = cache / 'managed-member'
+                          with archive.open(member) as stream, candidate.open('wb') as output:
+                              shutil.copyfileobj(stream, output)
+                          with candidate.open('rb') as stream:
+                              if stream_identity(stream, record['bytes']) != record:
+                                  raise RuntimeError(f'Managed file checksum mismatch: {owner}: {name}')
+                          overlay(candidate, owner, name, record, dict(source, archive_path=name))
+                      if seen != set(entry['files']):
+                          raise RuntimeError(f'Missing managed archive members: {owner}: {sorted(set(entry["files"]) - seen)}')
+              return owners
 
 
           def visible(path):
@@ -74,7 +306,43 @@ jobs:
               return path
 
 
-          def build(workspace, releases, download, deployment):
+          def withdrawn_paths(workspace):
+              config = workspace / WITHDRAWAL_CONFIG
+              if config.is_symlink() or (config.exists() and not config.is_file()):
+                  raise RuntimeError('FastDL withdrawal config must be a regular file')
+              if not config.is_file():
+                  return set()
+              if config.stat().st_size > 16384:
+                  raise RuntimeError('FastDL withdrawal config exceeds 16 KiB')
+              maps = json.loads(config.read_text(encoding='utf-8'))
+              if (not isinstance(maps, list) or len(maps) > 100
+                      or not all(isinstance(name, str) and re.fullmatch('[a-z0-9_]{1,100}', name)
+                                 for name in maps)
+                      or len(set(maps)) != len(maps)):
+                  raise RuntimeError('FastDL withdrawal config requires unique canonical map names')
+              return {f'maps/{name}.{ext}' for name in maps for ext in ('bsp', 'bsp.bz2')}
+
+
+          def build(workspace, releases, download, deployment, *, require_catalog=False):
+              withdrawn = withdrawn_paths(workspace)
+              catalog, catalog_identity = map_catalog(workspace, require_catalog)
+              reserved = set(catalog['reserved']) if catalog else set()
+
+              def suppress_legacy_map(path):
+                  match = ROOT_BSP.fullmatch(path.lower())
+                  if not catalog or not match:
+                      return False
+                  if match[1] in reserved:
+                      return True
+                  raise RuntimeError(f'Uncataloged playable map from legacy source: {path}')
+
+              if catalog:
+                  # Withdrawals are migrated into permanent reservations; legacy config
+                  # cannot withdraw a later catalog-approved revision.
+                  missing = {ROOT_BSP.fullmatch(path)[1] for path in withdrawn} - reserved
+                  if missing:
+                      raise RuntimeError(f'Migrate legacy withdrawals into catalog reserved list: {sorted(missing)}')
+                  withdrawn = set()
               site = workspace / 'public'
               site.mkdir()  # Fail rather than inventory a pre-existing directory.
               cache = workspace / '.release-downloads'
@@ -85,6 +353,8 @@ jobs:
                   (r for r in releases if not r.get('draft')),
                   key=lambda r: (r.get('published_at') or '', r['id']))
               for release in published:
+                  if release['tag_name'].lower().startswith(MANAGED_TAG):
+                      continue
                   assets = sorted(release['assets'], key=lambda a: (a.get('updated_at') or '', a['id']))
                   for asset in assets:
                       name = asset['name']
@@ -93,6 +363,8 @@ jobs:
                           continue
                       if safe_path(name).name != name or '\\' in name:
                           raise RuntimeError(f'Invalid release filename: {name}')
+                      if lower.endswith(('.bsp', '.bsp.bz2')) and suppress_legacy_map('maps/' + name):
+                          continue
                       package = cache / str(asset['id'])
                       download(release, asset, package)
                       with package.open('rb') as stream:
@@ -115,7 +387,9 @@ jobs:
                                       raise RuntimeError(f'ZIP symlink: {entry.filename}')
                                   if entry.is_dir() or entry.filename.endswith(('/', '\\')):
                                       continue
-                                  if not visible(relative) or relative.as_posix() == 'manifest.json':
+                                  if (not visible(relative) or relative.as_posix().lower() in
+                                          {'manifest.json', WITHDRAWAL_CONFIG, CATALOG}
+                                          or suppress_legacy_map(relative.as_posix())):
                                       continue
                                   target = site.joinpath(*relative.parts)
                                   target.parent.mkdir(parents=True, exist_ok=True)
@@ -142,6 +416,8 @@ jobs:
                           raise RuntimeError(f'Repository symlink: {relative}')
                       if not source.is_file() or not visible(relative):
                           continue
+                      if suppress_legacy_map(relative.as_posix()):
+                          continue
                       target = site / relative
                       target.parent.mkdir(parents=True, exist_ok=True)
                       shutil.copyfile(source, target)
@@ -156,19 +432,31 @@ jobs:
                       sources[name] = dict(kind='repository', path=name, commit=deployment['commit'])
               if not (workspace / 'index.html').is_file():
                   raise RuntimeError('Add the inventory index.html template to the repository root')
+              managed_owners = (apply_catalog(catalog, site, cache, sources, inputs, published, download)
+                                if catalog else {})
 
+              # Apply after every overlay so old releases and repository uploads
+              # cannot restore either downloadable form of a withdrawn map.
               files = []
               for path in sorted(site.rglob('*')):
                   if not path.is_file():
                       continue
                   relative = path.relative_to(site).as_posix()
+                  if relative.lower() in withdrawn:
+                      path.unlink()
+                      print(f'Withdrawing {relative} from Pages', flush=True)
+                      continue
                   with path.open('rb') as stream:
                       digest = hashlib.file_digest(stream, 'sha256').hexdigest()
                   files.append(dict(path=relative, url='./' + quote(relative, safe='/'),
                                     bytes=path.stat().st_size, sha256=digest, source=sources[relative]))
+                  if relative in managed_owners:
+                      files[-1]['map_owners'] = managed_owners[relative]
               manifest = dict(schema_version=1, deployment=deployment, inputs=inputs, files=files,
                               file_count=len(files), total_bytes=sum(f['bytes'] for f in files),
                               excludes=['manifest.json'])
+              if catalog_identity:
+                  manifest['map_catalog'] = catalog_identity
               (site / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
               print(f"Prepared {len(files)} indexed files, {manifest['total_bytes']:,} bytes, plus manifest.json")
               return site, manifest
@@ -194,7 +482,8 @@ jobs:
               deployment = dict(repository=repo, commit=commit, run_id=run_id, run_attempt=attempt,
                                 run_url=f'https://github.com/{repo}/actions/runs/{run_id}/attempts/{attempt}',
                                 generated_at=datetime.now(timezone.utc).isoformat())
-              site, manifest = build(Path.cwd(), [r for page in pages for r in page], download, deployment)
+              site, manifest = build(Path.cwd(), [r for page in pages for r in page], download, deployment,
+                                     require_catalog=REQUIRE_CATALOG)
               summary = os.environ.get('GITHUB_STEP_SUMMARY')
               if summary:
                   with open(summary, 'a', encoding='utf-8') as output:
