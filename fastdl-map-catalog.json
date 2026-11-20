@@ -1,5 +1,5 @@
 {
-  "generation": 1,
+  "generation": 2,
   "maps": {
     "gm_bigcity_improved_lite": {
       "files": {
@@ -19,25 +19,6 @@
       },
       "sources": {},
       "title": "gm_bigcity_improved_lite"
-    },
-    "gm_funkis_night": {
-      "files": {
-        "maps/gm_funkis_night.bsp.bz2": {
-          "bytes": 171347247,
-          "sha256": "338d05f3f2c2a73e2b3aa5d222baae1fe0b283bb5a554f030be480c8dce562dc"
-        }
-      },
-      "item": "",
-      "pins": {
-        "maps/gm_funkis_night.bsp.bz2": {
-          "asset": "gm_funkis_night.bsp.bz2",
-          "asset_id": 766495324,
-          "release_id": 450950725,
-          "tag": "funkis-night-3382694345-original-20261106"
-        }
-      },
-      "sources": {},
-      "title": "gm_funkis_night"
     }
   },
   "reserved": [
