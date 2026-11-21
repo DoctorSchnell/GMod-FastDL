@@ -1,5 +1,5 @@
 {
-  "generation": 2,
+  "generation": 3,
   "maps": {
     "gm_bigcity_improved_lite": {
       "files": {
@@ -19,10 +19,76 @@
       },
       "sources": {},
       "title": "gm_bigcity_improved_lite"
+    },
+    "gm_fork_better": {
+      "bundle": {
+        "asset": "managed-map.zip",
+        "sha256": "172e4eb45998ae855d9772217e7ebcbc583e651f2cb7458311357af221306d17",
+        "tag": "managed-map-172e4eb45998ae855d9772217e7ebcbc583e651f2cb7458311357af221306d17"
+      },
+      "derived": {
+        "bsp": {
+          "bytes": 190090538,
+          "sha256": "b118e49bc4afb67e2faca35e4d2f1d9d09d29d7280e7bc7e085ebd8b48daac11"
+        },
+        "embedded_sha256": "1a1658d0129b3618b9ad4e15acfaf8bff86d15131aadb75f843fa5d7854e191a",
+        "recipe_sha256": "938c0c11e84fc2c136a488c490322728112c49808afac945d2f0b8ddf4bf8c7a",
+        "source_map": "gm_fork_better"
+      },
+      "files": {
+        "maps/gm_fork_better.bsp.bz2": {
+          "bytes": 81101036,
+          "sha256": "df5473c8a9f1bf87064e23836878dbca0c6047ea30ded747f7cee914af407eb8"
+        },
+        "maps/thumb/gm_fork_better.png": {
+          "bytes": 187802,
+          "sha256": "fa7e1d8d5f0218478d334472c138317821086584881d0b91110b114360f9de37"
+        },
+        "maps/thumb/robloxnew.png": {
+          "bytes": 16715,
+          "sha256": "2cf19893d40ad2ead2710bc6b53ab7c6dd8cca6f890046cd14fe3f8c0892244f"
+        }
+      },
+      "item": "3560775288",
+      "sources": {
+        "3560775288": {
+          "dependencies": [
+            "3569203772"
+          ],
+          "file_size": 190267272,
+          "gma_sha256": "f4af54f0321288ce272edf2aa7553b741b2fd2eef2620ea1f37f4a2e8c0f7009",
+          "hcontent_file": "2573292270538454173",
+          "manifest": "2573292270538454173",
+          "publishedfileid": "3560775288",
+          "steam_required": [
+            "3569203772"
+          ],
+          "time_updated": 1762322890
+        },
+        "3569203772": {
+          "dependencies": [
+            "3560775288"
+          ],
+          "file_size": 15766971,
+          "gma_sha256": "522b63f2de311a5e2ae7bc6ec6bdcf2235db65ca9a5e636fcf96a97921068d00",
+          "hcontent_file": "3344455151234584752",
+          "manifest": "3344455151234584752",
+          "publishedfileid": "3569203772",
+          "steam_required": [
+            "3560775288"
+          ],
+          "time_updated": 1761860792
+        }
+      },
+      "title": "gm_fork Better",
+      "workshop_credits": [
+        "https://steamcommunity.com/sharedfiles/filedetails/?id=326332456"
+      ]
     }
   },
   "reserved": [
     "gm_bigcity_improved_lite",
+    "gm_fork_better",
     "gm_funkis_night"
   ],
   "schema": 1
