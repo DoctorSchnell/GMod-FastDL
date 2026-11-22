@@ -1,23 +1,35 @@
 {
-  "generation": 3,
+  "generation": 4,
   "maps": {
     "gm_bigcity_improved_lite": {
+      "bundle": {
+        "asset": "managed-map.zip",
+        "sha256": "7bad811d0f7338dab8510d8ee148abf1e157bd9cac0cf4e20c7fc968a5a22ad6",
+        "tag": "managed-map-7bad811d0f7338dab8510d8ee148abf1e157bd9cac0cf4e20c7fc968a5a22ad6"
+      },
       "files": {
         "maps/gm_bigcity_improved_lite.bsp.bz2": {
           "bytes": 65361467,
           "sha256": "05a056c3513ddf8221259c9df575ca2ab551c214199f477770769fbd2ef28b2e"
+        },
+        "maps/thumb/gm_bigcity_improved_lite.png": {
+          "bytes": 436241,
+          "sha256": "732b435502f3ce70f474b71ea7240121c24d0017356fcec6f7041c4c2b6bfaec"
         }
       },
-      "item": "",
-      "pins": {
-        "maps/gm_bigcity_improved_lite.bsp.bz2": {
-          "asset": "gm_bigcity_improved_lite.bsp.bz2",
-          "asset_id": 690267806,
-          "release_id": 428501569,
-          "tag": "v0.2.0"
+      "item": "1129969546",
+      "sources": {
+        "1129969546": {
+          "dependencies": [],
+          "file_size": 140557229,
+          "gma_sha256": "4b3fd07fc05867a7364d863ee83f68cc35bad18fc66c730c82e3dc00e941e464",
+          "hcontent_file": "3027694958692649391",
+          "manifest": "3027694958692649391",
+          "publishedfileid": "1129969546",
+          "steam_required": [],
+          "time_updated": 1590936063
         }
       },
-      "sources": {},
       "title": "gm_bigcity_improved_lite"
     },
     "gm_fork_better": {
