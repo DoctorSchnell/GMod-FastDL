@@ -1,5 +1,5 @@
 {
-  "generation": 4,
+  "generation": 5,
   "maps": {
     "gm_bigcity_improved_lite": {
       "bundle": {
@@ -96,12 +96,44 @@
       "workshop_credits": [
         "https://steamcommunity.com/sharedfiles/filedetails/?id=326332456"
       ]
+    },
+    "gm_genesis": {
+      "bundle": {
+        "asset": "managed-map.zip",
+        "sha256": "b5ad3499a35f14b1583fc905becb9ad84482b944c64941e3887dc70868ee52f0",
+        "tag": "managed-map-b5ad3499a35f14b1583fc905becb9ad84482b944c64941e3887dc70868ee52f0"
+      },
+      "files": {
+        "maps/gm_genesis.bsp.bz2": {
+          "bytes": 43195472,
+          "sha256": "112a92aaa9e1ca5c2799b43f28ee5beaf1fa86d4fce89b109515de32d636e513"
+        },
+        "maps/thumb/gm_genesis.png": {
+          "bytes": 137762,
+          "sha256": "de0a56b259d9773c743d1af58a292e48a520e85c18b5f9c0d160e11787e73a94"
+        }
+      },
+      "item": "266666023",
+      "sources": {
+        "266666023": {
+          "dependencies": [],
+          "file_size": 31192004,
+          "gma_sha256": "d3e02781a6f30c0f6dfd085fd87173f175c9cc5fcafbb151f4b923e9d1b44240",
+          "hcontent_file": "96095950943167269",
+          "manifest": "96095950943167269",
+          "publishedfileid": "266666023",
+          "steam_required": [],
+          "time_updated": 1480795864
+        }
+      },
+      "title": "gm_genesis"
     }
   },
   "reserved": [
     "gm_bigcity_improved_lite",
     "gm_fork_better",
-    "gm_funkis_night"
+    "gm_funkis_night",
+    "gm_genesis"
   ],
   "schema": 1
 }
