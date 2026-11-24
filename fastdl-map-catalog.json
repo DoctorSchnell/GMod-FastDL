@@ -1,5 +1,5 @@
 {
-  "generation": 5,
+  "generation": 6,
   "maps": {
     "gm_bigcity_improved_lite": {
       "bundle": {
@@ -127,13 +127,41 @@
         }
       },
       "title": "gm_genesis"
+    },
+    "gm_valley": {
+      "bundle": {
+        "asset": "managed-map.zip",
+        "sha256": "83e21eaa3fb7b00506150b3ec5495bb4b27f5d324ec320f180d25081e038edf8",
+        "tag": "managed-map-83e21eaa3fb7b00506150b3ec5495bb4b27f5d324ec320f180d25081e038edf8"
+      },
+      "files": {
+        "maps/gm_valley.bsp.bz2": {
+          "bytes": 26546329,
+          "sha256": "d7515bf8d3f0f50b4650a8036eebf8c77f4e623457fd514fea02da0425c86e6b"
+        }
+      },
+      "item": "104483504",
+      "sources": {
+        "104483504": {
+          "dependencies": [],
+          "file_size": 19127653,
+          "gma_sha256": "59fcc8372d0f97ec994b60042b9e2301e12edb3b81f4edd72a90161833ca30a8",
+          "hcontent_file": "595859641454159170",
+          "manifest": "595859641454159170",
+          "publishedfileid": "104483504",
+          "steam_required": [],
+          "time_updated": 1351193899
+        }
+      },
+      "title": "gm_Valley"
     }
   },
   "reserved": [
     "gm_bigcity_improved_lite",
     "gm_fork_better",
     "gm_funkis_night",
-    "gm_genesis"
+    "gm_genesis",
+    "gm_valley"
   ],
   "schema": 1
 }
