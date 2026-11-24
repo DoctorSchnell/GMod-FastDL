@@ -67,6 +67,8 @@ jobs:
           CATALOG = 'fastdl-map-catalog.json'
           REQUIRE_CATALOG = True  # Bridge rollout uses False until the initial catalog commit.
           MANAGED_TAG = 'managed-map-'
+          CONTENT_ROOTS = ('maps', 'models', 'materials', 'sound', 'sounds', 'resource',
+                           'scripts', 'particles', 'gfx')
           MAP_NAME = re.compile('[a-z0-9_]{1,100}')
           ROOT_BSP = re.compile(r'maps/([^/]+)\.bsp(?:\.bz2)?')
           SHA256 = re.compile('[0-9a-f]{64}')
@@ -387,9 +389,13 @@ jobs:
                                       raise RuntimeError(f'ZIP symlink: {entry.filename}')
                                   if entry.is_dir() or entry.filename.endswith(('/', '\\')):
                                       continue
-                                  if (not visible(relative) or relative.as_posix().lower() in
-                                          {'manifest.json', WITHDRAWAL_CONFIG, CATALOG}
-                                          or suppress_legacy_map(relative.as_posix())):
+                                  path = relative.as_posix()
+                                  if not visible(relative) or len(relative.parts) < 2:
+                                      continue
+                                  if (relative.parts[0].lower() not in CONTENT_ROOTS
+                                          and not re.fullmatch(r'data/medicinal/ac130/bundles/[0-9a-f]{64}\.bsp\.bz2', path)):
+                                      continue
+                                  if suppress_legacy_map(path):
                                       continue
                                   target = site.joinpath(*relative.parts)
                                   target.parent.mkdir(parents=True, exist_ok=True)
@@ -403,8 +409,7 @@ jobs:
                           sources[relative] = dict(source)
 
               # Repository uploads take precedence over all release contents.
-              for name in ('maps', 'models', 'materials', 'sound', 'sounds', 'resource',
-                           'scripts', 'particles', 'gfx', 'notices'):
+              for name in CONTENT_ROOTS:
                   root = workspace / name
                   if root.is_symlink():
                       raise RuntimeError(f'Repository symlink: {name}')
