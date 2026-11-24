@@ -41,8 +41,6 @@
     .source-detail { display: block; font-size: .8rem; color: #a7b9bb; }
     footer { border-top: 1px solid #304145; padding-top: 20px; margin-top: 32px; font-size: .85rem; color: #a7b9bb; }
     #status { min-height: 24px; }
-    #credits { margin-top: 16px; max-width: 800px; }
-    #credits p { margin-top: 10px; }
     @media (max-width: 600px) { main { padding: 28px 16px; } th, td { padding: 12px; } .stat { min-width: 140px; } }
   </style>
 </head>
@@ -51,17 +49,18 @@
   <header>
     <div class="eyebrow">Medicinal Sandbox / Content delivery</div>
     <h1>FastDL file library</h1>
-    <p class="muted">Browse the files published in this deployment. Select a path to download it.</p>
+    <p class="muted">Browse player downloads. Select a file path to download it.</p>
     <nav aria-label="Deployment links">
       <a href="./manifest.json">Download JSON manifest</a>
       <a href="https://github.com/DoctorSchnell/GMod-FastDL">Source repository</a>
+      <a href="https://github.com/DoctorSchnell/GMod-FastDL/releases">Release packages and licenses</a>
       <a id="run" hidden>Deployment run</a>
       <a id="commit" hidden>Repository commit</a>
     </nav>
   </header>
   <section class="stats" aria-label="Deployment totals">
-    <div class="stat"><strong id="count">—</strong><span>Indexed files</span></div>
-    <div class="stat"><strong id="size">—</strong><span>Indexed download size</span></div>
+    <div class="stat"><strong id="count">—</strong><span>Player files</span></div>
+    <div class="stat"><strong id="size">—</strong><span>Total download size</span></div>
     <div class="stat"><strong id="date">—</strong><span>Inventory built · your local time</span></div>
   </section>
   <div class="toolbar">
@@ -78,19 +77,13 @@
     </table>
   </div>
   <footer>
-    <p>This inventory was generated with the deployed files. Sizes and SHA-256 hashes describe the hosted bytes, including compression. It includes this homepage and excludes the manifest itself.</p>
-    <details id="credits">
-      <summary>AC130 attribution · applies when AC130 content is hosted here</summary>
-      <p>Medicinal AC130 artwork: DoctorSchnell / Codex.</p>
-      <p>Engine sound: FlightGear C130, Emmanuel Baranger (Helijah), Didier Fabert and contributors; GPL-2.0. Required notices and editable source accompany hosted AC130 content in <code>notices/</code>.</p>
-      <p>GAU/howitzer audio adaptations retain U.S. Air Force / MSgt Jeffrey Curtin and U.S. Army / SGT Bryan Spradlin / 16th Mobile Public Affairs Detachment credits. No U.S. government endorsement is implied.</p>
-    </details>
+    <p>Sizes and SHA-256 hashes describe the served files, including compression.</p>
   </footer>
 </main>
 <script>
   'use strict';
   const element = id => document.getElementById(id);
-  let inventory;
+  let playerFiles;
   const sourceLabel = source => source.kind === 'release' ? `Release ${source.tag}` : 'Repository main';
   const sourceDetail = source => source.kind === 'release' ? source.asset : source.path;
   function sizeLabel(bytes) {
@@ -107,11 +100,11 @@
     return node;
   }
   function render() {
-    if (!inventory) return;
+    if (!playerFiles) return;
     const query = element('query').value.trim().toLowerCase();
     const folder = element('folder').value;
-    const files = inventory.files.filter(file =>
-      (!folder || (file.path.includes('/') ? file.path.split('/')[0] : '(root)') === folder) &&
+    const files = playerFiles.filter(file =>
+      (!folder || file.path.split('/')[0] === folder) &&
       `${file.path} ${sourceLabel(file.source)} ${sourceDetail(file.source)}`.toLowerCase().includes(query));
     const mode = element('sort').value;
     files.sort((a, b) => (mode === 'size' ? b.bytes - a.bytes : mode === 'source' ?
@@ -136,18 +129,19 @@
       rows.append(row);
     }
     element('files').replaceChildren(rows);
-    element('status').textContent = `${files.length.toLocaleString()} of ${inventory.file_count.toLocaleString()} files · ${sizeLabel(files.reduce((sum, file) => sum + file.bytes, 0))} shown`;
+    element('status').textContent = `${files.length.toLocaleString()} of ${playerFiles.length.toLocaleString()} files · ${sizeLabel(files.reduce((sum, file) => sum + file.bytes, 0))} shown`;
   }
   async function load() {
     try {
       const response = await fetch('./manifest.json', { cache: 'no-store' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      inventory = await response.json();
+      const inventory = await response.json();
       if (inventory.schema_version !== 1 || !Array.isArray(inventory.files)) throw new Error('Unsupported inventory');
-      element('count').textContent = inventory.file_count.toLocaleString();
-      element('size').textContent = sizeLabel(inventory.total_bytes);
+      playerFiles = inventory.files.filter(file => file.path.includes('/') && !file.path.toLowerCase().startsWith('notices/'));
+      element('count').textContent = playerFiles.length.toLocaleString();
+      element('size').textContent = sizeLabel(playerFiles.reduce((sum, file) => sum + file.bytes, 0));
       element('date').textContent = new Date(inventory.deployment.generated_at).toLocaleString();
-      for (const folder of [...new Set(inventory.files.map(file => file.path.includes('/') ? file.path.split('/')[0] : '(root)'))].sort()) {
+      for (const folder of [...new Set(playerFiles.map(file => file.path.split('/')[0]))].sort()) {
         const option = addText('option', folder, element('folder'));
         option.value = folder;
       }
