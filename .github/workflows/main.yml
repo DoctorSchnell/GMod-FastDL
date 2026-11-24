@@ -495,10 +495,46 @@ jobs:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
+      - name: Install the Pages artifact lookup client
+        run: |
+          npm install --prefix "$RUNNER_TEMP/pages-lookup" --no-save --ignore-scripts --no-audit --no-fund @actions/artifact@2.1.3
+
       - name: Upload site
+        id: upload
         uses: actions/upload-pages-artifact@v4
         with:
           path: public
+
+      - name: Wait for the uploaded Pages artifact
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        timeout-minutes: 3
+        env:
+          UPLOADED_ARTIFACT_ID: ${{ steps.upload.outputs.artifact_id }}
+        with:
+          script: |
+            // Use the same runner-scoped list as deploy-pages@v4.
+            const {DefaultArtifactClient} = require(process.env.RUNNER_TEMP + '/pages-lookup/node_modules/@actions/artifact')
+            const client = new DefaultArtifactClient()
+            const expected = process.env.UPLOADED_ARTIFACT_ID
+            if (!/^[1-9][0-9]*$/.test(expected)) throw new Error('Upload returned no valid artifact ID')
+
+            const attempts = 7
+            for (let attempt = 1; attempt <= attempts; attempt++) {
+              const {artifacts} = await client.listArtifacts()
+              const matches = artifacts.filter(artifact => artifact.name === 'github-pages')
+              if (matches.length) {
+                if (matches.length !== 1 || String(matches[0].id) !== expected) {
+                  throw new Error(`Expected github-pages ID ${expected}, found IDs ${matches.map(a => a.id).join(', ')}`)
+                }
+                core.info(`Found uploaded github-pages artifact ${expected} on lookup ${attempt}.`)
+                return
+              }
+              if (attempt < attempts) {
+                core.info(`Lookup ${attempt}/${attempts}: github-pages ${expected} is not visible yet. Retrying in 10s.`)
+                await new Promise(resolve => setTimeout(resolve, 10000))
+              }
+            }
+            throw new Error(`Uploaded github-pages artifact ${expected} was missing after ${attempts} lookups`)
 
       - name: Publish site
         id: deployment
